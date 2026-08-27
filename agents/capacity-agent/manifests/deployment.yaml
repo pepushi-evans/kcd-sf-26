@@ -1,0 +1,119 @@
+# The capacity agent, confined at all three layers:
+#
+#   PROCESS  - nono wraps the Python agent in a kernel-enforced Landlock
+#              sandbox: default-deny filesystem, egress only through the
+#              L7 proxy (GitHub restricted to the agent account's repos).
+#              Credentials are phantom-token injected: GITHUB_TOKEN and
+#              GOOGLE_API_KEY in the agent's environment are decoys — the
+#              nono supervisor holds the real values and swaps them in at
+#              the proxy, so a prompt-injected agent cannot exfiltrate them.
+#   WORKLOAD - restricted PSS: non-root, RuntimeDefault seccomp (which
+#              permits the landlock_* syscalls with no extra privilege),
+#              read-only rootfs, no capabilities + default-deny NetworkPolicy.
+#   CHANGE   - read-only RBAC (rbac.yaml); the only write path is a GitHub
+#              PR that a human merges and Flux reconciles.
+#
+# Node requirement: kernel >= 6.7 (Landlock ABI v4) for per-process TCP
+# egress filtering. kind nodes share the host kernel.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capacity-agent
+  namespace: agents
+  labels:
+    app.kubernetes.io/name: capacity-agent
+    app.kubernetes.io/part-of: kcd-sf-26-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: capacity-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: capacity-agent
+    spec:
+      serviceAccountName: capacity-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          # Built from agents/capacity-agent/ and side-loaded with
+          # `kind load docker-image capacity-agent:demo`.
+          image: capacity-agent:demo
+          imagePullPolicy: Never
+          # --allow-cwd: non-interactive nono requires explicit consent for
+          # the profile's workdir grant (there's no TTY to prompt on).
+          # --sandbox-policy landlock: pure-Landlock TCP enforcement (ABI v4,
+          # kernel >= 6.7). The default `auto` adds a seccomp-notify baseline
+          # whose supervisor handoff needs pidfd_getfd — capability-gated
+          # (CAP_SYS_PTRACE) under RuntimeDefault seccomp, so it can't work in
+          # a restricted pod. Landlock leaves UDP unfiltered; the
+          # NetworkPolicy ring covers that (DNS to kube-dns only).
+          command: ["nono", "run", "--silent", "--allow-cwd", "--sandbox-policy", "landlock", "--profile", "/etc/nono/profile.json", "--"]
+          args: ["python", "/app/main.py"]
+          workingDir: /workspace
+          env:
+            - name: HOME
+              value: /home/agent
+            - name: HPA_NAMESPACE
+              value: checkout
+            - name: HPA_NAME
+              value: checkout
+            - name: GITHUB_REPO
+              value: pepushi-evans/kcd-sf-26
+            - name: HPA_FILE_PATH
+              value: apps/checkout/hpa.yaml
+            - name: AGENT_INTERVAL
+              value: "60"
+            # Real credentials, read by the nono SUPERVISOR before the
+            # sandbox is applied; the sandboxed child sees phantom tokens
+            # under the same variable names.
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: capacity-agent-github
+                  key: token
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: capacity-agent-model
+                  key: google-api-key
+                  optional: true # absent -> agent falls back to heuristic mode
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: nono-profile
+              mountPath: /etc/nono
+              readOnly: true
+            - name: home # nono supervisor state ($HOME/.nono)
+              mountPath: /home/agent
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nono-profile
+          configMap:
+            name: capacity-agent-nono-profile
+        - name: home
+          emptyDir: {}
+        - name: workspace
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

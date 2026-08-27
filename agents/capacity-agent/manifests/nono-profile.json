@@ -1,0 +1,55 @@
+{
+  "$schema": "https://nono.sh/schema/profile.json",
+  "meta": {
+    "name": "capacity-agent",
+    "description": "Landlock/Seatbelt confinement for the ADK capacity agent: default-deny filesystem, egress only to the kube API, Gemini, and the agent account's own GitHub repos (L7 path rules). GitHub + Gemini credentials are phantom-token injected by the proxy - the agent process never holds the real secrets."
+  },
+  "filesystem": {
+    "allow": ["/tmp"],
+    "read": [
+      "/app",
+      "/usr",
+      "/lib",
+      "/etc",
+      "/var/run/secrets/kubernetes.io/serviceaccount"
+    ]
+  },
+  "workdir": { "access": "readwrite" },
+  "network": {
+    "network_profile": "minimal",
+    "allow_domain": [
+      "kubernetes.default.svc",
+      "10.96.0.1",
+      "127.0.0.1",
+      "generativelanguage.googleapis.com",
+      {
+        "domain": "api.github.com",
+        "endpoints": [
+          { "method": "GET", "path": "/repos/pepushi-evans/**" },
+          { "method": "POST", "path": "/repos/pepushi-evans/*/git/refs" },
+          { "method": "PUT", "path": "/repos/pepushi-evans/*/contents/**" },
+          { "method": "POST", "path": "/repos/pepushi-evans/*/pulls" },
+          { "method": "GET", "path": "/user" },
+          { "method": "GET", "path": "/rate_limit" }
+        ]
+      }
+    ],
+    "credentials": ["github", "gemini"],
+    "custom_credentials": {
+      "github": {
+        "upstream": "https://api.github.com",
+        "credential_key": "env://GITHUB_TOKEN",
+        "env_var": "GITHUB_TOKEN",
+        "inject_header": "Authorization",
+        "credential_format": "Bearer {}"
+      },
+      "gemini": {
+        "upstream": "https://generativelanguage.googleapis.com",
+        "credential_key": "env://GOOGLE_API_KEY",
+        "env_var": "GOOGLE_API_KEY",
+        "inject_header": "x-goog-api-key",
+        "credential_format": "{}"
+      }
+    }
+  }
+}

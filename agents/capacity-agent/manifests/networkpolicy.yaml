@@ -1,0 +1,55 @@
+# WORKLOAD layer: default-deny both directions, then the minimum egress.
+# Defense in depth with nono: the CNI confines the POD at L3/L4 while nono
+# confines the PROCESS at L7 — two independent rings. (kind's kindnet
+# enforces NetworkPolicy on current versions; on a CNI that doesn't, the
+# nono ring still holds.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: capacity-agent
+  namespace: agents
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: capacity-agent
+  policyTypes: [Ingress, Egress]
+  ingress: [] # nothing talks TO the agent
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # kube-apiserver. In kind, the Service VIP DNATs to the control-plane
+    # node address on 6443 (docker network, typically 172.18.0.0/16).
+    - to:
+        - ipBlock:
+            cidr: 10.96.0.1/32
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: 172.18.0.0/16
+      ports:
+        - protocol: TCP
+          port: 6443
+    # HTTPS to the internet (GitHub API + Gemini), never to internal ranges
+    # or cloud metadata. Hostname-level allowlisting is nono's job at L7.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

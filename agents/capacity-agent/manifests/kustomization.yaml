@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - networkpolicy.yaml
+  - deployment.yaml
+# The nono profile ships as a ConfigMap generated from the same JSON file
+# that run-local.sh uses on a laptop — one sandbox definition, two runtimes.
+configMapGenerator:
+  - name: capacity-agent-nono-profile
+    namespace: agents
+    files:
+      - profile.json=nono-profile.json
+# Secrets capacity-agent-github / capacity-agent-model are created
+# out-of-band by infra/bootstrap.sh so credentials never live in Git.

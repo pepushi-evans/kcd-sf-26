@@ -1,0 +1,48 @@
+# CHANGE layer: the agent can observe the cluster but mutate nothing.
+# An agent that can `kubectl patch` can also `kubectl delete` — so it gets
+# neither. Reads inform the analysis; the only write path is a Git PR that
+# Flux reconciles after human review. Rollback is `git revert`.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: capacity-agent
+  namespace: agents
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: capacity-agent-readonly
+rules:
+  - apiGroups: [""]
+    resources: [pods, services, namespaces, events, nodes]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods, nodes]
+    verbs: [get, list]
+  # The GitOps pipeline itself, so the agent can reason about sync state.
+  - apiGroups:
+      - source.toolkit.fluxcd.io
+      - kustomize.toolkit.fluxcd.io
+      - helm.toolkit.fluxcd.io
+    resources: ["*"]
+    verbs: [get, list, watch]
+  # Deliberately absent: secrets (any verb), and every write verb on everything.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: capacity-agent-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: capacity-agent-readonly
+subjects:
+  - kind: ServiceAccount
+    name: capacity-agent
+    namespace: agents
