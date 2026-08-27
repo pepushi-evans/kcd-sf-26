@@ -141,6 +141,15 @@ exposure (it mints a short-lived token for the read-only ServiceAccount):
 cd agents/capacity-agent && ./run-local.sh --once
 ```
 
+## SPIFFE workload identity (nono ≥ 0.70)
+
+The sandbox can also source credentials from a **SPIRE Workload API** instead
+of static secrets: the supervisor fetches short-lived JWT-SVIDs and rotates
+them in the background, so the agent's identity is attested and expiring —
+never a value in its environment. [agents/capacity-agent/spiffe/](agents/capacity-agent/spiffe/)
+has a two-script local demo (throwaway SPIRE + a sandbox route that injects
+`sub: spiffe://kcd-sf-26.demo/capacity-agent`) and the in-cluster CSI notes.
+
 ## Repo layout
 
 ```
