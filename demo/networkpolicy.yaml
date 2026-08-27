@@ -1,0 +1,66 @@
+# =============================================================================
+# WORKLOAD layer: namespace + default-deny egress NetworkPolicy.
+#
+# Defense in depth with nono: nono enforces egress per-PROCESS from the kernel;
+# NetworkPolicy enforces it at the POD network from the CNI. Two independent
+# rings. agent-sandbox (kubernetes-sigs) leaves network policy to you to
+# compose exactly like this; nono ships it inline. The talk shows both.
+# Requires a CNI that enforces NetworkPolicy (Cilium, Calico, etc.).
+# =============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agents
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: review-agent-egress
+  namespace: agents
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: review-agent
+  policyTypes:
+    - Egress
+    - Ingress
+  ingress: []          # no inbound connections to the agent at all
+  egress:
+    # DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server (Flux MCP server reads cluster state, read-only).
+    # Replace with your API server CIDR/endpoint; this is cluster-specific.
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.1/32      # <- your kube-apiserver ClusterIP/endpoint
+      ports:
+        - protocol: TCP
+          port: 443
+    # Egress to the internet on 443 only (model provider + GitHub).
+    # Tighten with an FQDN-aware policy (Cilium) or an egress proxy if you can;
+    # plain NetworkPolicy cannot do hostname allowlists. nono CAN, per-process.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16     # block link-local / cloud metadata (IMDS)
+              - 10.0.0.0/8         # block internal RFC1918 ranges...
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

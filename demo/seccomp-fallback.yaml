@@ -1,0 +1,60 @@
+# =============================================================================
+# FALLBACK: custom seccomp profile for nodes whose RuntimeDefault predates the
+# Landlock syscall entries.
+#
+# You almost certainly DON'T need this on a modern cluster. Verified against
+# moby/profiles seccomp/default.json @ main: landlock_add_rule,
+# landlock_create_ruleset, and landlock_restrict_self are already SCMP_ACT_ALLOW
+# with no capability gate and no minKernel floor.
+#
+# Use this ONLY if `landlock_create_ruleset` returns EPERM in a RuntimeDefault
+# pod on a kernel you know is >= 5.13 (i.e. the node's profile is too old).
+#
+# HOW TO USE:
+#   1. Place the JSON below at, on each node:
+#        /var/lib/kubelet/seccomp/profiles/nono-landlock.json
+#      (the kubelet seccomp root is <kubelet-root-dir>/seccomp)
+#   2. In agent-deployment.yaml, replace the pod securityContext seccompProfile:
+#        seccompProfile:
+#          type: Localhost
+#          localhostProfile: profiles/nono-landlock.json
+#
+# The profile below = "allow everything except a small deny set, and explicitly
+# allow the landlock syscalls". For a hardened version, start from the full
+# moby default.json and confirm lines for landlock_* are present (they are at
+# lines 198-200 on main today).
+# =============================================================================
+#
+# /var/lib/kubelet/seccomp/profiles/nono-landlock.json
+# ----------------------------------------------------
+# {
+#   "defaultAction": "SCMP_ACT_ERRNO",
+#   "defaultErrnoRet": 1,
+#   "archMap": [
+#     { "architecture": "SCMP_ARCH_X86_64",
+#       "subArchitectures": ["SCMP_ARCH_X86", "SCMP_ARCH_X32"] },
+#     { "architecture": "SCMP_ARCH_AARCH64",
+#       "subArchitectures": ["SCMP_ARCH_ARM"] }
+#   ],
+#   "syscalls": [
+#     {
+#       "names": [
+#         "landlock_add_rule",
+#         "landlock_create_ruleset",
+#         "landlock_restrict_self",
+#         "prctl"
+#       ],
+#       "action": "SCMP_ACT_ALLOW",
+#       "comment": "Required by nono/Landlock. prctl(PR_SET_NO_NEW_PRIVS) belt-and-suspenders."
+#     }
+#     // ... plus the full moby default allowlist for normal operation.
+#     // Easiest path: copy moby/profiles seccomp/default.json verbatim
+#     // (it already contains the three landlock_* names) and ship THAT
+#     // as the Localhost profile.
+#   ]
+# }
+#
+# Verification command (run inside a candidate pod):
+#   strace -f -e trace=landlock_create_ruleset nono run -- true 2>&1 | grep landlock
+#   # EPERM/ENOSYS on a 6.x kernel  -> seccomp is the blocker, use this fallback
+#   # returns an fd / ABI version    -> RuntimeDefault is fine, no fallback needed

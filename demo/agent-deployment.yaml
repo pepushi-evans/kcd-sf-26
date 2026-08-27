@@ -1,0 +1,239 @@
+# =============================================================================
+# KCD SF 2026 - "Making Agent Work Human-Reviewable and Multiplayer with GitOps"
+#
+# Demo: a centrally-run AI agent, confined at all three layers.
+#
+#   1. PROCESS layer  -> nono wraps the agent binary (kernel-enforced Landlock)
+#   2. WORKLOAD layer -> the Pod: RuntimeDefault seccomp, no added caps,
+#                        non-root, read-only rootfs, NetworkPolicy egress
+#                        allowlist (see networkpolicy.yaml)
+#   3. CHANGE layer   -> the agent's ServiceAccount is READ-ONLY on the
+#                        cluster (see rbac.yaml). It can observe everything,
+#                        mutate nothing. The only write path is a Git PR that
+#                        Flux reconciles. Rollback == `git revert`.
+#
+# CREDENTIALS (this file): the GitHub token lives in a Kubernetes Secret, but
+# the agent process NEVER SEES IT. We feed the Secret to nono's built-in
+# `github` credential route and use PROXY (phantom-token) injection:
+#
+#   K8s Secret  ->  container env GITHUB_TOKEN  ->  read by the nono SUPERVISOR
+#                   (parent) before the sandbox is applied
+#   agent child ->  gets a phantom token (NONO_PROXY_TOKEN), not the real one
+#   gh / git    ->  call api.github.com; nono's proxy validates the phantom and
+#                   swaps in the real `Authorization: token <real>` upstream
+#
+# So even if the agent is prompt-injected or compromised, it cannot exfiltrate
+# the GitHub token: it isn't in the child's environment or memory. This is the
+# single most quotable security beat of the talk.
+#
+# Why it runs under RuntimeDefault (verified against moby/profiles
+# seccomp/default.json @ main): landlock_add_rule / landlock_create_ruleset /
+# landlock_restrict_self are SCMP_ACT_ALLOW with NO capability gate and NO
+# minKernel floor. RuntimeDefault sets no_new_privs, which is what
+# landlock_restrict_self needs in lieu of CAP_SYS_ADMIN.
+#
+# Node requirements: kernel >= 5.13 (Landlock fs), >= 6.7 (Landlock ABI v4,
+# nono's TCP port egress filtering). Pin a recent node (nodeSelector below).
+# =============================================================================
+---
+# NOTE: the GitHub token and model-key Secrets are NOT defined here on purpose,
+# so that `kubectl apply -f` never clobbers a real credential with a placeholder.
+# Create them out-of-band (or via SealedSecret / ExternalSecret in real GitOps):
+#   kubectl -n agents create secret generic review-agent-git \
+#     --from-file=token=<path-to-fine-grained-token>     # scope: open PRs, not push-to-main
+#   kubectl -n agents create secret generic review-agent-model \
+#     --from-literal=anthropic-api-key=sk-ant-...
+# If your token file is `export KEY=VALUE`, extract just VALUE first, e.g.:
+#   sed -E 's/^[^=]*=//; s/^["'"'"']//; s/["'"'"']$//' file | tr -d '\r\n' \
+#     | kubectl -n agents create secret generic review-agent-git --from-file=token=/dev/stdin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: review-agent
+  namespace: agents
+  labels:
+    app.kubernetes.io/name: review-agent
+    app.kubernetes.io/part-of: kcd-sf-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: review-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: review-agent
+    spec:
+      serviceAccountName: review-agent        # read-only RBAC (see rbac.yaml)
+      automountServiceAccountToken: true       # token is read-only on the cluster
+
+      # Pin a node new enough for Landlock TCP-port filtering. Label your demo
+      # node and uncomment the second selector.
+      nodeSelector:
+        kubernetes.io/os: linux
+        # demo.kcd.sf/kernel: "6.7-plus"
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault                 # allows landlock_* unconditionally
+
+      containers:
+        - name: agent
+          # Your agent image with `nono`, `gh`/`git`, and your agent CLI on PATH.
+          image: localhost:5577/review-agent:demo
+          imagePullPolicy: IfNotPresent
+
+          # PROCESS layer: the agent never runs bare. nono applies a
+          # kernel-enforced, irrevocable Landlock sandbox. Profile credentials
+          # ["github","anthropic"] turn on proxy injection for those routes.
+          #
+          # For the live demo this runs a self-test (proves the workspace is
+          # writable while /etc is not), then keeps the pod alive so you can
+          # inspect it. In production, replace the wrapped `sh -c ...` with your
+          # agent entrypoint, e.g.:
+          #   nono run --profile /etc/nono/agent.json --credential github \
+          #     --allow-domain api.github.com --skip-dir store -- \
+          #     review-agent --workdir=/workspace --git-mode=pull-request
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              umask 077
+              echo "=== nono $(nono --version) ==="
+              # Layers 1+2: filesystem confinement (process + workload)
+              nono run --profile /etc/nono/agent.json -- sh -c '
+                echo ok > /workspace/probe && echo "workspace write: $(cat /workspace/probe)"
+                if cat /etc/shadow >/dev/null 2>&1; then echo "SHADOW LEAKED"; else echo "shadow read: blocked"; fi
+                if echo x > /etc/probe 2>/dev/null; then echo "ETC WRITE LEAKED"; else echo "etc write: blocked"; fi
+              '
+              # Layer 3 prep: credential injection. The agent child sees only a
+              # phantom token; nono swaps in the real one toward api.github.com.
+              # --allow-domain is required on this nono version (0.61) so the
+              # credential-intercept upstream filter permits api.github.com.
+              echo "=== gh repo list through nono credential proxy ==="
+              nono run --profile /etc/nono/agent.json --credential github \
+                --allow-domain api.github.com --skip-dir store --skip-dir .cache \
+                -- gh repo list --limit 5 || echo "(gh failed; check token + network)"
+              echo "=== verified; sleeping (replace with agent in prod) ==="
+              exec sleep infinity
+
+          env:
+            - name: HOME
+              value: /home/agent              # nono state dir ($HOME/.nono); writable emptyDir below
+            - name: FLUX_MCP_READONLY
+              value: "true"
+            # ---- Credential sources for the nono SUPERVISOR (parent) ----
+            # The built-in `github` route reads env://GITHUB_TOKEN; the built-in
+            # `anthropic` route reads env://ANTHROPIC_API_KEY. nono reads these
+            # BEFORE applying the sandbox, then the child gets only phantom
+            # tokens. The real values are zeroized from memory after exec.
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: review-agent-git
+                  key: token
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: review-agent-model
+                  key: anthropic-api-key
+
+          securityContext:
+            allowPrivilegeEscalation: false     # reinforces no_new_privs
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]                     # nono needs NO added caps
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+
+          volumeMounts:
+            - name: nono-profile
+              mountPath: /etc/nono
+              readOnly: true
+            - name: home                        # nono keeps state under $HOME/.nono
+              mountPath: /home/agent
+            - name: workspace                   # the only writable path
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: nono-profile
+          configMap:
+            name: review-agent-nono-profile
+        - name: home
+          emptyDir: {}
+        - name: workspace
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+# nono profile (JSON, matching nono's documented schema). Filesystem is
+# default-deny except the workspace; network credentials enable proxy injection
+# for the built-in github + anthropic routes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: review-agent-nono-profile
+  namespace: agents
+# NOTE: agent.json below must be PURE JSON (no comments inside the block).
+# filesystem.read grants read-only access to the Nix closure (/nix/store) and
+# profile symlinks (/opt/toolchain) so the sandboxed agent can exec its own
+# binaries (sh, gh, copilot, ...). Writes stay confined to /workspace and /tmp;
+# /etc, $HOME secrets, and the SA token dir stay unreadable/read-only.
+#
+# Credential routes: we OVERRIDE the built-in `github` route to inject
+# "Authorization: Bearer {}" instead of the built-in "token {}". Fine-grained
+# GitHub tokens (github_pat_...) are REJECTED with HTTP 401 under the "token"
+# scheme but accepted as "Bearer". Classic PATs (ghp_...) work with either.
+# Verified live: `gh repo list` / `gh api user` succeed through the proxy with
+# Bearer; the agent child only ever sees a phantom token.
+#   anthropic -> https://api.anthropic.com | x-api-key: {} | env://ANTHROPIC_API_KEY (built-in)
+#
+# HARDER VARIANT (token never in ANY process env, not even nono's supervisor):
+# mount the Secret as a FILE and point credential_key at it via file://, then
+# deny that path to the agent child:
+#   "github": {
+#     "upstream": "https://api.github.com",
+#     "credential_key": "file:///etc/nono/secrets/github-token",
+#     "env_var": "GH_TOKEN",
+#     "inject_header": "Authorization",
+#     "credential_format": "Bearer {}"
+#   }
+#   ...with the Secret mounted at /etc/nono/secrets/github-token (subPath) and
+#   that path added to filesystem.deny.
+data:
+  agent.json: |
+    {
+      "meta": { "name": "review-agent" },
+      "filesystem": {
+        "allow": ["/workspace", "/tmp"],
+        "read": ["/nix/store", "/opt/toolchain", "/etc/nono"],
+        "deny": ["/var/run/secrets/kubernetes.io"]
+      },
+      "network": {
+        "network_profile": "minimal",
+        "allow_domain": ["api.github.com", "api.anthropic.com"],
+        "credentials": ["github", "anthropic"],
+        "custom_credentials": {
+          "github": {
+            "upstream": "https://api.github.com",
+            "credential_key": "env://GITHUB_TOKEN",
+            "env_var": "GITHUB_TOKEN",
+            "inject_header": "Authorization",
+            "credential_format": "Bearer {}"
+          }
+        }
+      }
+    }
