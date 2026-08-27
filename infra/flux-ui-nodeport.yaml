@@ -1,0 +1,18 @@
+# Exposes the Flux Web UI (embedded in flux-operator, port 9080) on
+# NodePort 30080, which infra/kind-cluster.yaml maps to localhost:8080.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flux-operator-web
+  namespace: flux-system
+  labels:
+    app.kubernetes.io/name: flux-operator-web
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: flux-operator
+  ports:
+    - name: http-web
+      port: 9080
+      targetPort: 9080
+      nodePort: 30080

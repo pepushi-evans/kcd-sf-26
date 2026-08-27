@@ -1,0 +1,54 @@
+# Demo beat: apply this by hand to saturate checkout.
+#
+#   kubectl apply -f loadtest/loadtest-job.yaml
+#   kubectl -n checkout logs -f job/checkout-load
+#
+# 16 closed-loop workers each need ~50ms of checkout CPU per request, which
+# demands ~2-3 cores of serving capacity — far more than maxReplicas(4) x
+# 150m = 600m. The HPA pins at max and stays there until the agent's PR
+# raising maxReplicas is merged and Flux reconciles it.
+#
+# Delete it to end the incident: kubectl delete -f loadtest/loadtest-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: checkout-load
+  namespace: checkout
+  labels:
+    app.kubernetes.io/name: checkout-load
+    app.kubernetes.io/part-of: kcd-sf-26-demo
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: checkout-load
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: load
+          image: checkout:demo
+          imagePullPolicy: Never
+          command: ["python", "/app/load.py"]
+          env:
+            - name: TARGET
+              value: "http://checkout.checkout.svc:9898/checkout"
+            - name: WORKERS
+              value: "16"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

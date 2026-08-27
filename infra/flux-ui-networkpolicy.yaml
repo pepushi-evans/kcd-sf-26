@@ -1,0 +1,22 @@
+# The flux-operator chart's own NetworkPolicy admits web traffic only from
+# pod namespaces; NodePort traffic entering from the host has none and gets
+# dropped. This opens the web UI port to external (host/browser) sources —
+# fine for a local kind demo, not something to copy to a real cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: flux-operator-web-external
+  namespace: flux-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: flux-operator
+      app.kubernetes.io/instance: flux-operator
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 9080
+          protocol: TCP

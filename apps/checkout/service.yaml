@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout
+  namespace: checkout
+  labels:
+    app.kubernetes.io/name: checkout
+spec:
+  # NodePort 30098 is mapped to host port 9898 in infra/kind-cluster.yaml,
+  # so `curl localhost:9898/checkout` works from the VM during the demo.
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: checkout
+  ports:
+    - name: http
+      port: 9898
+      targetPort: http
+      nodePort: 30098

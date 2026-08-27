@@ -1,0 +1,21 @@
+# Reconciles the capacity agent itself. The agent is a declarative workload
+# like everything else: its Deployment, RBAC, and nono sandbox profile all
+# live in Git and arrive via Flux — the agent operates the cluster with us,
+# but nothing about the agent was ever `kubectl apply`ed by hand.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: agents
+  namespace: flux-system
+spec:
+  interval: 1m
+  retryInterval: 30s
+  timeout: 3m
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./agents/capacity-agent/manifests
+  dependsOn:
+    - name: apps

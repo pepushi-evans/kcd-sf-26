@@ -1,0 +1,36 @@
+# The FluxInstance the flux-operator reconciles into a full Flux
+# distribution, synced to this repo. Applied once by infra/bootstrap.sh;
+# everything after this arrives through Git.
+#
+# Auth: secret "flux-system" (username=git, password=<fine-grained PAT with
+# Contents: read on pepushi-evans/kcd-sf-26>) — see bootstrap.sh.
+apiVersion: fluxcd.controlplane.io/v1
+kind: FluxInstance
+metadata:
+  name: flux # the operator requires this exact name
+  namespace: flux-system
+  annotations:
+    fluxcd.controlplane.io/reconcileEvery: "1h"
+    fluxcd.controlplane.io/reconcileTimeout: "5m"
+spec:
+  distribution:
+    version: "2.x"
+    registry: "ghcr.io/fluxcd"
+    artifact: "oci://ghcr.io/controlplaneio-fluxcd/flux-operator-manifests"
+  components:
+    - source-controller
+    - kustomize-controller
+    - helm-controller
+    - notification-controller
+  cluster:
+    type: kubernetes
+    size: small
+    multitenant: false
+    networkPolicy: true
+    domain: "cluster.local"
+  sync:
+    kind: GitRepository
+    url: "https://github.com/pepushi-evans/kcd-sf-26"
+    ref: "refs/heads/main"
+    path: "clusters/kind"
+    pullSecret: "flux-system"

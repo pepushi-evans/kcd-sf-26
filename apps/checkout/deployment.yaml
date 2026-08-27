@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: checkout
+  labels:
+    app.kubernetes.io/name: checkout
+    app.kubernetes.io/part-of: kcd-sf-26-demo
+spec:
+  # No `replicas` field: the HPA owns scale. (If we set it here, every Flux
+  # reconcile would fight the autoscaler.)
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: checkout
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: checkout
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: checkout
+          # Built from apps/checkout/app/ and side-loaded with `kind load
+          # docker-image checkout:demo`; Never = fail loudly if it's missing.
+          image: checkout:demo
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 9898
+          env:
+            - name: WORK_ITERATIONS
+              value: "120000"
+          # The point of the demo: each replica gets only 150m of CPU, so a
+          # steady concurrent load pins the whole fleet at its limit and the
+          # HPA runs out of maxReplicas long before the nodes run out of room.
+          resources:
+            requests:
+              cpu: 150m
+              memory: 64Mi
+            limits:
+              cpu: 150m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

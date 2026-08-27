@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+# app/ (source + Dockerfile) and the load generator are intentionally not
+# Flux-managed; the load test is applied by hand as a demo beat.

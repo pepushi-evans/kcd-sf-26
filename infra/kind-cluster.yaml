@@ -1,0 +1,28 @@
+# kind cluster for the KCD SF 2026 demo.
+#
+# 1 control-plane + 2 workers so the capacity story is real: the HPA can max
+# out its replica budget while the cluster still has schedulable node capacity
+# left over — exactly the gap the agent is asked to notice.
+#
+# Host ports (this VM) -> NodePorts, so the demo surfaces are reachable
+# without a port-forward:
+#   localhost:8080 -> Flux web UI (NodePort 30080)
+#   localhost:9898 -> demo web app (NodePort 30098)
+#
+# Landlock note: kind nodes share the host kernel. nono's per-process TCP
+# egress filtering needs kernel >= 6.7 (Landlock ABI v4); this demo VM runs
+# 6.8, so the sandbox works identically in-cluster and on a dev machine.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kcd-sf-26
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 30098
+        hostPort: 9898
+        protocol: TCP
+  - role: worker
+  - role: worker

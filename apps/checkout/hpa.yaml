@@ -1,0 +1,36 @@
+# The HPA the capacity agent watches — and the file it proposes PRs against.
+#
+# maxReplicas is deliberately low: under the demo load the HPA hits 4/4 with
+# utilization pinned near 100%, while the cluster still has plenty of
+# allocatable CPU. Closing that gap is the agent's job, and the only write
+# path it has is a pull request to THIS file.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: checkout
+  namespace: checkout
+  labels:
+    app.kubernetes.io/part-of: kcd-sf-26-demo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: checkout
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 60
