@@ -1,0 +1,44 @@
+# Every commit and PR — human- or agent-authored — must pass validation
+# before merge:
+#   flux-schema  — the Flux project's schema plugin validates every manifest
+#                  against the default catalog (Kubernetes + Flux APIs) and
+#                  the ecosystem catalog (schemas.fluxoperator.dev), CEL
+#                  rules included, per .fluxschema.yml
+#   nono-profile — the agent's sandbox policy is config too: nono statically
+#                  validates the profile JSON (schema + policy-group refs),
+#                  so a broken confinement policy can't merge
+name: validate
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  flux-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Flux CLI with schema plugin
+        uses: fluxcd/flux2/action@main
+        with:
+          plugins: |
+            schema
+      - name: Validate manifests
+        uses: fluxcd/flux-schema/actions/validate@main
+
+  nono-profile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install nono
+        run: |
+          curl -fsSL https://github.com/always-further/nono/releases/download/v0.74.0/nono-v0.74.0-x86_64-unknown-linux-musl.tar.gz \
+            | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Validate sandbox profile
+        run: nono profile validate agents/capacity-agent/manifests/nono-profile.json
