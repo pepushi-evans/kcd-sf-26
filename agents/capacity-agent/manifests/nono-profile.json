@@ -21,7 +21,14 @@
       "kubernetes.default.svc",
       "10.96.0.1",
       "127.0.0.1",
+      "flux-operator-mcp.flux-system.svc",
       "generativelanguage.googleapis.com",
+      {
+        "domain": "raw.githubusercontent.com",
+        "endpoints": [
+          { "method": "GET", "path": "/fluxcd/flux-schema/**" }
+        ]
+      },
       {
         "domain": "api.github.com",
         "endpoints": [

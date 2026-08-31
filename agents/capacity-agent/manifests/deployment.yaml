@@ -71,6 +71,10 @@ spec:
               value: apps/checkout/hpa.yaml
             - name: AGENT_INTERVAL
               value: "60"
+            # Read-only Flux context tools via the Flux Operator MCP server
+            # (installed by infra/bootstrap.sh); remove to run without MCP.
+            - name: FLUX_MCP_URL
+              value: "http://flux-operator-mcp.flux-system.svc:9090/mcp"
             # Real credentials, read by the nono SUPERVISOR before the
             # sandbox is applied; the sandboxed child sees phantom tokens
             # under the same variable names.

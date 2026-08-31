@@ -40,6 +40,14 @@ spec:
       ports:
         - protocol: TCP
           port: 6443
+    # Flux Operator MCP server (read-only Flux/GitOps context tools)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: flux-system
+      ports:
+        - protocol: TCP
+          port: 9090
     # HTTPS to the internet (GitHub API + Gemini), never to internal ranges
     # or cloud metadata. Hostname-level allowlisting is nono's job at L7.
     - to:

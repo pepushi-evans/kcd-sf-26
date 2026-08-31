@@ -40,6 +40,11 @@ helm upgrade --install flux-operator \
   oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator \
   --namespace flux-system --create-namespace --wait
 
+echo ">> flux-operator-mcp (read-only Flux context tools for the agent)"
+helm upgrade --install flux-operator-mcp \
+  oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator-mcp \
+  --namespace flux-system --set readonly=true --wait
+
 echo ">> git auth secret for FluxInstance sync"
 TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
 kubectl -n flux-system create secret generic flux-system \

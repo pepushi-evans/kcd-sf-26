@@ -6,8 +6,16 @@
 ARG NONO_IMAGE=ghcr.io/nolabs-ai/nono:latest
 FROM ${NONO_IMAGE} AS nono
 
+# flux-schema: the Flux project's schema-validation plugin. The agent runs it
+# on its own proposed manifest before opening a PR — the same gate CI enforces.
+FROM debian:12-slim AS flux-plugins
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates bash \
+    && curl -s https://fluxcd.io/install.sh | bash \
+    && flux plugin install schema
+
 FROM python:3.12-slim
 COPY --from=nono /usr/bin/nono /usr/bin/nono
+COPY --from=flux-plugins /root/.fluxcd/plugins/flux-schema /usr/local/bin/flux-schema
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt

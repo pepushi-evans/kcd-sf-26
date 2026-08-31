@@ -51,7 +51,42 @@ this workflow exactly, calling tools in this order:
 Report a concise final summary of what you observed and what you proposed.
 If any tool returns an error, report it honestly and stop — never invent
 results.
+
+Note: open_capacity_pr validates the proposed manifest with the Flux
+project's flux-schema plugin before opening anything; if it reports a
+validation error, do not retry with different YAML — report the error.
+
+If Flux MCP tools are also available (get_flux_instance,
+get_kubernetes_resources, search_flux_docs), you may use them read-only to
+enrich the PR body with GitOps pipeline context (e.g. which Flux
+Kustomization owns the HPA and its sync status). They are optional — the
+workflow above is complete without them.
 """
+
+
+def _flux_mcp_toolset():
+    """Optional: the Flux Operator MCP server as ADK tools (read-only).
+
+    Enabled by FLUX_MCP_URL (e.g. http://flux-operator-mcp.flux-system.svc:9090/mcp).
+    The same L7 sandbox rules apply to these calls — the MCP server is just
+    another allowlisted upstream.
+    """
+    url = os.environ.get("FLUX_MCP_URL")
+    if not url:
+        return None
+    from google.adk.tools.mcp_tool import (
+        McpToolset,
+        StreamableHTTPConnectionParams,
+    )
+
+    return McpToolset(
+        connection_params=StreamableHTTPConnectionParams(url=url),
+        tool_filter=[
+            "get_flux_instance",
+            "get_kubernetes_resources",
+            "search_flux_docs",
+        ],
+    )
 
 
 def build_agent() -> LlmAgent:
@@ -66,17 +101,21 @@ def build_agent() -> LlmAgent:
             api_base=os.environ.get("LLM_API_BASE"),
             api_key=os.environ.get("LLM_API_KEY"),
         )
+    tools = [
+        k8s_tools.get_hpa_status,
+        k8s_tools.get_workload_resources,
+        k8s_tools.get_cluster_capacity,
+        github_tools.list_open_capacity_prs,
+        github_tools.get_hpa_manifest,
+        github_tools.open_capacity_pr,
+    ]
+    mcp = _flux_mcp_toolset()
+    if mcp is not None:
+        tools.append(mcp)
     return LlmAgent(
         name="capacity_agent",
         description="Watches HPA saturation and proposes capacity PRs.",
         model=model,
         instruction=INSTRUCTION,
-        tools=[
-            k8s_tools.get_hpa_status,
-            k8s_tools.get_workload_resources,
-            k8s_tools.get_cluster_capacity,
-            github_tools.list_open_capacity_prs,
-            github_tools.get_hpa_manifest,
-            github_tools.open_capacity_pr,
-        ],
+        tools=tools,
     )

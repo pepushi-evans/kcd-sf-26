@@ -1,0 +1,26 @@
+# The flux-operator-mcp chart's own NetworkPolicy only admits flux-system
+# traffic; this grants the capacity agent's namespace access to the MCP
+# server (read-only tools, port 9090). Lives with the agent because it is
+# the agent's access grant.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: flux-operator-mcp-from-agents
+  namespace: flux-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: flux-operator-mcp
+      app.kubernetes.io/instance: flux-operator-mcp
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agents
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: capacity-agent
+      ports:
+        - port: 9090
+          protocol: TCP

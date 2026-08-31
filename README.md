@@ -141,6 +141,28 @@ exposure (it mints a short-lived token for the read-only ServiceAccount):
 cd agents/capacity-agent && ./run-local.sh --once
 ```
 
+## The Flux project's agent tooling in this demo
+
+- **Schema gate** ([.github/workflows/validate.yaml](.github/workflows/validate.yaml)):
+  every commit and PR — human- or agent-authored — must pass
+  `flux schema validate` (the [fluxcd/flux-schema](https://github.com/fluxcd/flux-schema)
+  CLI plugin) against the default Kubernetes+Flux catalog and the
+  **ecosystem catalog** (schemas.fluxoperator.dev, ~9k CNCF CRD schemas,
+  CEL rules included). Config lives in [.fluxschema.yml](.fluxschema.yml).
+- **Agent self-check**: `open_capacity_pr` runs the same `flux-schema`
+  validation on its proposed manifest *before* opening the PR — inside the
+  sandbox, whose only new egress is `GET raw.githubusercontent.com/fluxcd/flux-schema/**`.
+- **Flux MCP server** ([flux-operator-mcp](https://fluxoperator.dev/mcp-server/),
+  installed read-only by bootstrap): the ADK agent mounts it as an
+  `McpToolset` (`FLUX_MCP_URL`), filtered to `get_flux_instance`,
+  `get_kubernetes_resources`, `search_flux_docs`, so the LLM can enrich its
+  PR analysis with GitOps pipeline state. Remove the env var to run without it.
+- **[fluxcd/agent-skills](https://github.com/fluxcd/agent-skills)**: the
+  Flux project's SKILL.md packs for coding-agent harnesses (Claude Code,
+  Copilot, Codex, `flux operator skills install`). This demo's agent bakes
+  the same ideas into its ADK instruction; the skills' repo-audit phase uses
+  the identical `flux-schema` validation this repo enforces in CI.
+
 ## SPIFFE workload identity (nono ≥ 0.70)
 
 The sandbox can also source credentials from a **SPIRE Workload API** instead

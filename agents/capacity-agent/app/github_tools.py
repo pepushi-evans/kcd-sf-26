@@ -13,6 +13,8 @@ to GitHub directly with a real token.
 import base64
 import os
 import re
+import shutil
+import subprocess
 import time
 
 import httpx
@@ -72,6 +74,25 @@ def get_hpa_manifest() -> dict:
     }
 
 
+def _schema_check(manifest_text: str) -> str | None:
+    """Validate a manifest with the Flux project's flux-schema plugin
+    (the same gate CI runs on every commit). Returns an error summary if
+    invalid, None if valid. The sandbox only allows GETs to the Flux schema
+    catalog for this — the agent checks its own work before proposing it."""
+    exe = shutil.which("flux-schema")
+    if exe is None:
+        return None  # local dev without the plugin; CI still gates the PR
+    r = subprocess.run(
+        [exe, "validate", "--schema-location", "default"],
+        input=manifest_text.encode(),
+        capture_output=True,
+        timeout=120,
+    )
+    if r.returncode == 0:
+        return None
+    return (r.stdout or r.stderr).decode(errors="replace").strip()[:800]
+
+
 def open_capacity_pr(new_max_replicas: int, title: str, body: str) -> dict:
     """Open a pull request that raises maxReplicas in the HPA manifest.
 
@@ -92,6 +113,9 @@ def open_capacity_pr(new_max_replicas: int, title: str, body: str) -> dict:
         manifest["content"],
         count=1,
     )
+    schema_error = _schema_check(new_text)
+    if schema_error:
+        return {"error": f"proposed manifest failed flux-schema validation: {schema_error}"}
     branch = f"{BRANCH_PREFIX}checkout-max-{new_max_replicas}-{int(time.time())}"
     if DRY_RUN:
         return {

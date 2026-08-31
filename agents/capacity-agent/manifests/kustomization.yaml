@@ -4,6 +4,7 @@ resources:
   - namespace.yaml
   - rbac.yaml
   - networkpolicy.yaml
+  - mcp-access-networkpolicy.yaml
   - deployment.yaml
 # The nono profile ships as a ConfigMap generated from the same JSON file
 # that run-local.sh uses on a laptop — one sandbox definition, two runtimes.

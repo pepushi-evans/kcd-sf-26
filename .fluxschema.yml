@@ -1,0 +1,22 @@
+# Declarative config for `flux schema validate` (fluxcd/flux-schema plugin) —
+# shared by CI (.github/workflows/validate.yaml), local runs, and the
+# capacity agent's own pre-PR self-check.
+#   default   = the Flux project's schema catalog (Kubernetes + Flux APIs)
+#   ecosystem = schemas.fluxoperator.dev (CNCF CRDs, incl. FluxInstance)
+apiVersion: schema.plugin.fluxcd.io/v1beta1
+kind: Config
+validate:
+  schemaLocation:
+    - default
+    - ecosystem
+  skipKind:
+    # kind's cluster config is CLI input, not a cluster-applied resource
+    - kind.x-k8s.io/v1alpha4/Cluster
+  skipFile:
+    - '.*'
+    - kustomization.yaml
+    - nono-profile.json
+    - app
+    - spiffe
+    - slides
+  verbose: true
