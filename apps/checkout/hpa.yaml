@@ -17,7 +17,7 @@ spec:
     kind: Deployment
     name: checkout
   minReplicas: 2
-  maxReplicas: 4
+  maxReplicas: 7
   metrics:
     - type: Resource
       resource:
