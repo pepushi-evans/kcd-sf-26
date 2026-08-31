@@ -12,7 +12,7 @@ it exactly one write path: **a pull request a human reviews, and Flux applies**.
 | Change | the cluster | read-only RBAC; writes leave only as Git PRs that **Flux** reconciles after human review |
 
 nono confines the process, the pod confines the workload, **Flux confines the
-change** — and the rollback is `git revert`, not a prayer.
+change** — and the rollback is `git revert`.
 
 ## The story
 
