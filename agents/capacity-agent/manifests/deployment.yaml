@@ -61,14 +61,15 @@ spec:
           env:
             - name: HOME
               value: /home/agent
+            # The target HPA is the agent's ONLY configuration. The GitHub
+            # repository, branch, and manifest path are all derived at
+            # runtime by flux-tracing the HPA to its GitRepository — while
+            # the nono profile's allowlist stays static policy, so a trace
+            # that resolved anywhere unexpected would hit the sandbox wall.
             - name: HPA_NAMESPACE
               value: checkout
             - name: HPA_NAME
               value: checkout
-            - name: GITHUB_REPO
-              value: pepushi-evans/kcd-sf-26
-            - name: HPA_FILE_PATH
-              value: apps/checkout/hpa.yaml
             - name: AGENT_INTERVAL
               value: "60"
             # Read-only Flux context tools via the Flux Operator MCP server

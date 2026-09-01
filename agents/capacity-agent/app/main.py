@@ -11,8 +11,31 @@ import os
 import sys
 import time
 
+import flux_trace
 import github_tools
 import k8s_tools
+
+_trace_info = None
+
+
+async def ensure_traced() -> None:
+    """Derive the GitHub target by flux-tracing the HPA (once, retried on
+    failure each tick). The HPA is the agent's only configuration."""
+    global _trace_info
+    if github_tools.configured() and _trace_info is not None:
+        return
+    info = await flux_trace.trace_hpa_to_source()
+    cfg = github_tools.configure(
+        info["github_repo"], info["branch"], info["kustomization_path"],
+        k8s_tools.HPA_NAMESPACE, k8s_tools.HPA_NAME,
+    )
+    _trace_info = info
+    log(
+        f"flux trace ({info['traced_via']}): HPA {info['hpa']} -> "
+        f"Kustomization {info['kustomization']} -> "
+        f"GitRepository {info['git_repository']} -> {info['url']}"
+    )
+    log(f"derived target: {cfg['repo']}@{cfg['branch']}, manifest {cfg['hpa_file']}")
 
 INTERVAL = int(os.environ.get("AGENT_INTERVAL", "60"))
 # llm unless neither a Gemini key nor a LiteLLM endpoint is configured —
@@ -78,6 +101,7 @@ def remediate_heuristic(hpa: dict) -> None:
     if manifest["max_replicas_in_git"] != hpa["max_replicas"]:
         log("git already ahead of cluster; waiting for Flux to reconcile")
         return
+    trace = _trace_info or {}
     demand = math.ceil(
         hpa["current_replicas"]
         * hpa["current_cpu_utilization_pct"]
@@ -103,12 +127,20 @@ Estimated demand is ~{demand} replicas. The additional
 {new_max - hpa['max_replicas']} replicas need {(new_max - hpa['max_replicas']) * per_replica}m,
 well under 50% of free capacity. After merge, Flux reconciles the HPA and the
 autoscaler absorbs the load. Roll back with `git revert`.
+
+### GitOps context (flux trace, via {trace.get('traced_via', 'n/a')})
+
+`{trace.get('hpa', '?')}` -> Kustomization `{trace.get('kustomization', '?')}`
+-> GitRepository `{trace.get('git_repository', '?')}`
+-> {trace.get('url', '?')} (branch `{trace.get('branch', '?')}`) —
+the target repository was derived from this chain, not configured.
 """
     result = github_tools.open_capacity_pr(new_max, title, body)
     log(f"opened: {result}")
 
 
 async def tick() -> bool:
+    await ensure_traced()
     hpa = k8s_tools.get_hpa_status()
     log(
         f"hpa {hpa['namespace']}/{hpa['name']}: "
@@ -126,8 +158,18 @@ async def tick() -> bool:
 
 
 async def main() -> None:
+    # Under nono, every connection must traverse the sandbox proxy — drop
+    # NO_PROXY so even loopback targets (kind API, port-forwarded MCP) are
+    # proxied instead of direct-dialed into a Landlock denial.
+    if os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"):
+        os.environ.pop("NO_PROXY", None)
+        os.environ.pop("no_proxy", None)
     once = "--once" in sys.argv
-    log(f"mode={MODE} interval={INTERVAL}s repo={github_tools.REPO} dry_run={github_tools.DRY_RUN}")
+    log(
+        f"mode={MODE} interval={INTERVAL}s "
+        f"hpa={k8s_tools.HPA_NAMESPACE}/{k8s_tools.HPA_NAME} "
+        f"dry_run={github_tools.DRY_RUN} (repo: derived via flux trace)"
+    )
     while True:
         try:
             engaged = await tick()

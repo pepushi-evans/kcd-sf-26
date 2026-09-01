@@ -113,12 +113,16 @@ is shipped to the pod as a ConfigMap **via Flux** and used verbatim by
 
 ## The agent
 
-`agents/capacity-agent/` is a Google ADK `LlmAgent` with six tools: three
-read-only Kubernetes facts (HPA status, workload resources, node headroom) and
-three GitHub verbs (list open capacity PRs, read the HPA manifest, open the
-PR). The instruction walks a small model through the workflow step by step —
-verify, dedupe, measure, bound the increase by node capacity, show the math in
-the PR body.
+`agents/capacity-agent/` is a Google ADK `LlmAgent` with seven tools: a
+**flux trace** (HPA → owning Kustomization → GitRepository, over the Flux MCP
+server), three read-only Kubernetes facts (HPA status, workload resources,
+node headroom) and three GitHub verbs (list open capacity PRs, read the HPA
+manifest, open the PR). The target HPA is the agent's *only* configuration —
+the repository, branch, and manifest path are all derived from the trace,
+while the nono allowlist stays static policy: a trace that resolved anywhere
+unexpected would hit the sandbox wall. The instruction walks a small model
+through the workflow step by step — trace, verify, dedupe, measure, bound
+the increase by node capacity, show the math in the PR body.
 
 Model backends:
 

@@ -11,6 +11,7 @@ import os
 
 from google.adk.agents import LlmAgent
 
+import flux_trace
 import github_tools
 import k8s_tools
 
@@ -24,6 +25,11 @@ manifest in Git. A human reviews and merges; Flux applies the merged state.
 You are invoked when the checkout service's HPA appears saturated. Follow
 this workflow exactly, calling tools in this order:
 
+0. trace_hpa_to_source — flux-trace the HPA through its owning Flux
+   Kustomization to the GitRepository. This chain is where the target
+   repository and branch come from (they are never configured by hand);
+   the GitHub tools below operate on the traced repo automatically.
+   Include the chain verbatim in the PR body as the "GitOps context".
 1. get_hpa_status — confirm the HPA is genuinely capped: current_replicas
    equals max_replicas, current CPU utilization is at or above the target,
    and a ScalingLimited/TooManyReplicas condition is present. If it is not
@@ -102,6 +108,7 @@ def build_agent() -> LlmAgent:
             api_key=os.environ.get("LLM_API_KEY"),
         )
     tools = [
+        flux_trace.trace_hpa_to_source,
         k8s_tools.get_hpa_status,
         k8s_tools.get_workload_resources,
         k8s_tools.get_cluster_capacity,

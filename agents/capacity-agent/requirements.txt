@@ -2,3 +2,8 @@ google-adk[mcp]>=2.8
 litellm>=1.84
 kubernetes>=30.0
 httpx>=0.27
+# Pinned: google-genai 2.21.0 + aiohttp 3.14.x (released 2026-08-31) drop
+# proxied connections mid-response (ServerDisconnectedError through the nono
+# sandbox proxy); 2.20.0 + 3.13.x ride out the same drops.
+google-genai==2.20.0
+aiohttp<3.14

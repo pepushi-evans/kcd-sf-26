@@ -18,13 +18,76 @@ import subprocess
 import time
 
 import httpx
+import yaml
 
 GITHUB_API = os.environ.get("GITHUB_API", "https://api.github.com")
-REPO = os.environ.get("GITHUB_REPO", "pepushi-evans/kcd-sf-26")
-BRANCH = os.environ.get("GITHUB_BASE_BRANCH", "main")
-HPA_FILE = os.environ.get("HPA_FILE_PATH", "apps/checkout/hpa.yaml")
 BRANCH_PREFIX = "capacity/"
 DRY_RUN = os.environ.get("DRY_RUN", "") not in ("", "0", "false")
+
+# GitHub coordinates are DERIVED, not configured: main.py traces the target
+# HPA through Flux ownership (flux_trace.py) and calls configure(). The env
+# vars below are emergency overrides only — the demo never sets them.
+_cfg = {
+    "repo": os.environ.get("GITHUB_REPO"),
+    "branch": os.environ.get("GITHUB_BASE_BRANCH"),
+    "hpa_file": os.environ.get("HPA_FILE_PATH"),
+}
+
+
+def configured() -> bool:
+    return all(_cfg.values())
+
+
+def configure(github_repo: str, branch: str, kustomization_path: str,
+              hpa_namespace: str, hpa_name: str) -> dict:
+    """Adopt the flux-traced coordinates, then locate the HPA's manifest
+    file by walking the repo tree under the Kustomization's path."""
+    _cfg["repo"] = _cfg["repo"] or github_repo
+    _cfg["branch"] = _cfg["branch"] or branch
+    if not _cfg["hpa_file"]:
+        _cfg["hpa_file"] = _discover_hpa_file(
+            kustomization_path, hpa_namespace, hpa_name
+        )
+    return dict(_cfg)
+
+
+def _discover_hpa_file(base_path: str, namespace: str, name: str) -> str:
+    prefix = "" if base_path in (".", "") else base_path.rstrip("/") + "/"
+    with _client() as c:
+        r = c.get(
+            f"/repos/{_cfg['repo']}/git/trees/{_cfg['branch']}",
+            params={"recursive": "1"},
+        )
+        r.raise_for_status()
+        candidates = [
+            t["path"] for t in r.json()["tree"]
+            if t["type"] == "blob"
+            and t["path"].startswith(prefix)
+            and t["path"].endswith((".yaml", ".yml"))
+        ]
+        for path in candidates:
+            rr = c.get(f"/repos/{_cfg['repo']}/contents/{path}",
+                       params={"ref": _cfg["branch"]})
+            if rr.status_code != 200:
+                continue
+            try:
+                docs = list(yaml.safe_load_all(
+                    base64.b64decode(rr.json()["content"]).decode()
+                ))
+            except yaml.YAMLError:
+                continue
+            for doc in docs:
+                if not isinstance(doc, dict):
+                    continue
+                meta = doc.get("metadata", {})
+                if (doc.get("kind") == "HorizontalPodAutoscaler"
+                        and meta.get("name") == name
+                        and meta.get("namespace") in (None, namespace)):
+                    return path
+    raise RuntimeError(
+        f"no HorizontalPodAutoscaler {namespace}/{name} manifest found under "
+        f"'{prefix or './'}' in {_cfg['repo']}@{_cfg['branch']}"
+    )
 
 
 def _client() -> httpx.Client:
@@ -36,7 +99,7 @@ def _client() -> httpx.Client:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         },
-        timeout=30,
+        timeout=60,
     )
 
 
@@ -47,7 +110,7 @@ def list_open_capacity_prs() -> dict:
     another one — report the existing PR instead.
     """
     with _client() as c:
-        r = c.get(f"/repos/{REPO}/pulls", params={"state": "open"})
+        r = c.get(f"/repos/{_cfg['repo']}/pulls", params={"state": "open"})
         r.raise_for_status()
         prs = [
             {"number": p["number"], "title": p["title"], "url": p["html_url"],
@@ -60,15 +123,16 @@ def list_open_capacity_prs() -> dict:
 
 def get_hpa_manifest() -> dict:
     """Fetch the HPA manifest (the file a capacity PR would modify) from the
-    repo's main branch, returning its text and current maxReplicas."""
+    flux-traced repo and branch, returning its text and current maxReplicas."""
     with _client() as c:
-        r = c.get(f"/repos/{REPO}/contents/{HPA_FILE}", params={"ref": BRANCH})
+        r = c.get(f"/repos/{_cfg['repo']}/contents/{_cfg['hpa_file']}",
+                  params={"ref": _cfg['branch']})
         r.raise_for_status()
         data = r.json()
     text = base64.b64decode(data["content"]).decode()
     m = re.search(r"(?m)^\s*maxReplicas:\s*(\d+)", text)
     return {
-        "path": HPA_FILE,
+        "path": _cfg['hpa_file'],
         "max_replicas_in_git": int(m.group(1)) if m else None,
         "content": text,
     }
@@ -104,7 +168,7 @@ def open_capacity_pr(new_max_replicas: int, title: str, body: str) -> dict:
     manifest = get_hpa_manifest()
     old = manifest["max_replicas_in_git"]
     if old is None:
-        return {"error": f"could not find maxReplicas in {HPA_FILE}"}
+        return {"error": f"could not find maxReplicas in {_cfg['hpa_file']}"}
     if int(new_max_replicas) <= old:
         return {"error": f"new_max_replicas ({new_max_replicas}) must exceed current ({old})"}
     new_text = re.sub(
@@ -123,16 +187,16 @@ def open_capacity_pr(new_max_replicas: int, title: str, body: str) -> dict:
             "change": f"maxReplicas: {old} -> {new_max_replicas}",
         }
     with _client() as c:
-        r = c.get(f"/repos/{REPO}/git/ref/heads/{BRANCH}")
+        r = c.get(f"/repos/{_cfg['repo']}/git/ref/heads/{_cfg['branch']}")
         r.raise_for_status()
         base_sha = r.json()["object"]["sha"]
         r = c.post(
-            f"/repos/{REPO}/git/refs",
+            f"/repos/{_cfg['repo']}/git/refs",
             json={"ref": f"refs/heads/{branch}", "sha": base_sha},
         )
         r.raise_for_status()
         r = c.put(
-            f"/repos/{REPO}/contents/{HPA_FILE}",
+            f"/repos/{_cfg['repo']}/contents/{_cfg['hpa_file']}",
             json={
                 "message": f"checkout: raise HPA maxReplicas {old} -> {new_max_replicas}",
                 "content": base64.b64encode(new_text.encode()).decode(),
@@ -142,8 +206,8 @@ def open_capacity_pr(new_max_replicas: int, title: str, body: str) -> dict:
         )
         r.raise_for_status()
         r = c.post(
-            f"/repos/{REPO}/pulls",
-            json={"title": title, "body": body, "head": branch, "base": BRANCH},
+            f"/repos/{_cfg['repo']}/pulls",
+            json={"title": title, "body": body, "head": branch, "base": _cfg['branch']},
         )
         r.raise_for_status()
         pr = r.json()
@@ -152,6 +216,6 @@ def open_capacity_pr(new_max_replicas: int, title: str, body: str) -> dict:
 
 
 def get_file_sha(c: httpx.Client, ref: str) -> str:
-    r = c.get(f"/repos/{REPO}/contents/{HPA_FILE}", params={"ref": ref})
+    r = c.get(f"/repos/{_cfg['repo']}/contents/{_cfg['hpa_file']}", params={"ref": ref})
     r.raise_for_status()
     return r.json()["sha"]
