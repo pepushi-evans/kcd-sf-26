@@ -35,10 +35,12 @@ kubectl patch deployment metrics-server -n kube-system --type=json \
   -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' \
   2>/dev/null || true
 
-echo ">> flux-operator (includes the embedded Flux Web UI on port 9080)"
+echo ">> flux-operator (embedded Flux Web UI on 9080; anonymous admin for the local demo)"
 helm upgrade --install flux-operator \
   oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator \
-  --namespace flux-system --create-namespace --wait
+  --namespace flux-system --create-namespace \
+  -f infra/flux-operator-values.yaml --wait
+kubectl apply -f infra/flux-ui-admin-rbac.yaml
 
 echo ">> flux-operator-mcp (read-only Flux context tools for the agent)"
 helm upgrade --install flux-operator-mcp \
