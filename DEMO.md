@@ -87,6 +87,9 @@ kubectl -n checkout get hpa checkout -w         # maxReplicas rises, scales out,
 
 # 7. End the incident (also right after the talk):
 kubectl delete -f loadtest/loadtest-job.yaml
+# (HPA metrics lag ~1 min after load removal; if the agent engages on the
+#  residue it either stands down on the fresh numbers or opens a PR you
+#  close with: gh pr close <n> -R pepushi-evans/kcd-sf-26 --delete-branch)
 ```
 
 ## Reset between rehearsals
