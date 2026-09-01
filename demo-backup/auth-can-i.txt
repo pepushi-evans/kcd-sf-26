@@ -1,0 +1,9 @@
+no
+Resources                                       Non-Resource URLs                      Resource Names   Verbs
+selfsubjectreviews.authentication.k8s.io        []                                     []               [create]
+selfsubjectaccessreviews.authorization.k8s.io   []                                     []               [create]
+selfsubjectrulesreviews.authorization.k8s.io    []                                     []               [create]
+events                                          []                                     []               [get list watch]
+namespaces                                      []                                     []               [get list watch]
+nodes                                           []                                     []               [get list watch]
+pods                                            []                                     []               [get list watch]

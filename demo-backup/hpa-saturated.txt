@@ -1,0 +1,11 @@
+NAME       REFERENCE             TARGETS        MINPODS   MAXPODS   REPLICAS   AGE
+checkout   Deployment/checkout   cpu: 85%/60%   2         4         4          4d12h
+AbleToScale=True (ReadyForNewScale)
+ScalingActive=True (ValidMetricFound)
+ScalingLimited=True (TooManyReplicas)
+NAME                        CPU(cores)   MEMORY(bytes)   
+checkout-799f9784f6-7w9db   138m         13Mi            
+checkout-799f9784f6-rxml9   102m         26Mi            
+checkout-799f9784f6-t9nfg   148m         11Mi            
+checkout-799f9784f6-v8k5k   124m         12Mi            
+checkout-load-qr6jg         21m          24Mi            

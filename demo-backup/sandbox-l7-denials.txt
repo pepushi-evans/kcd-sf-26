@@ -1,0 +1,7 @@
+$ nono run --profile manifests/nono-profile.json -- curl https://api.github.com/repos/pepushi-evans/kcd-sf-26   # own repo
+HTTP 200
+
+$ ... -- curl https://api.github.com/repos/torvalds/linux   # anyone else's repo
+{"error":"Forbidden"}
+$ ... -- curl https://example.com   # the internet
+(blocked: host not in allowlist)

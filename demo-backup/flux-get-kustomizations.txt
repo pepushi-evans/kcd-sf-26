@@ -1,0 +1,4 @@
+NAME       	REVISION                     	SUSPENDED	READY	MESSAGE                                         
+agents     	refs/heads/main@sha1:975ec14e	False    	True 	Applied revision: refs/heads/main@sha1:975ec14e	
+apps       	refs/heads/main@sha1:975ec14e	False    	True 	Applied revision: refs/heads/main@sha1:975ec14e	
+flux-system	refs/heads/main@sha1:975ec14e	False    	True 	Applied revision: refs/heads/main@sha1:975ec14e	
