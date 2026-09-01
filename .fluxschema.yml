@@ -16,6 +16,7 @@ validate:
     - '.*'
     - kustomization.yaml
     - nono-profile.json
+    - flux-operator-values.yaml # helm values, not a Kubernetes resource
     - app
     - spiffe
     - slides
