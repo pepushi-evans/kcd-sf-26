@@ -36,10 +36,14 @@ kubectl patch deployment metrics-server -n kube-system --type=json \
   2>/dev/null || true
 
 echo ">> flux-operator (embedded Flux Web UI on 9080; anonymous admin for the local demo)"
+# Anonymous web auth: every visitor is user `flux` in group `flux-admin`,
+# which flux-ui-admin-rbac.yaml binds to the chart's flux-web-admin role —
+# unlocking the UI's GitOps actions and log viewer. Local kind demo ONLY.
 helm upgrade --install flux-operator \
   oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator \
   --namespace flux-system --create-namespace \
-  -f infra/flux-operator-values.yaml --wait
+  --set-json 'web.config={"authentication":{"type":"Anonymous","anonymous":{"username":"flux","groups":["flux-admin"]}}}' \
+  --wait
 kubectl apply -f infra/flux-ui-admin-rbac.yaml
 
 echo ">> flux-operator-mcp (read-only Flux context tools for the agent)"
